@@ -1,0 +1,516 @@
+```{r global_option,echo=FALSE}
+####################
+# Global Environment ■
+opts_chunk$set(fig.width=14,fig.height=8,echo=FALSE,warning=FALSE,error=FALSE,message=FALSE)
+```
+
+
+```{r setup}
+####################
+# Set Directory
+setwd("/home/demo/R/nas46")
+
+# Set CSS
+options(rstudio.markdownToHTML =
+  function(inputFile, outputFile) {
+    require(markdown)
+    markdownToHTML(inputFile, outputFile, stylesheet='custom.css')
+  }
+)
+options(scipen=1)
+
+# Set Nodename
+nodename<-"10.55.166.16"
+
+# Set File
+systemf<-paste("systeminfo",nodename,sep="_")
+sysstatf<-paste("sysstat",nodename,sep="_")
+latencyf<-paste("latency",nodename,sep="_")
+throughputf<-paste("throughput",nodename,sep="_")
+lunf<-paste("lun",nodename,sep="_")
+diskf<-paste("disk",nodename,sep="_")
+cifsf<-paste("cifs",nodename,sep="_")
+workload_full<-read.csv("full_workload.log")
+
+# Create data.frame
+sysinfo<-read.csv(systemf)
+dataA<-read.csv(sysstatf)
+laA<-read.csv(latencyf)
+thA<-read.csv(throughputf)
+lunlist<-read.csv(lunf)
+diskA<-read.csv(diskf)
+cifsA<-read.csv(cifsf)
+
+# Create Workload Subset NFS , CIFS
+nfsfull<-subset(workload_full,Type == "nfsv3" & RR+RW+SR+SW != 0,select=c(RR,RW,SR,SW))
+cifsfull<-subset(workload_full,Type == "cifs" & RR+RW+SR+SW != 0,select=c(RR,RW,SR,SW))
+
+# Iteration number
+n<-length(unique(sort(dataA$Iteration)))
+# Seconds by Iteration
+secitre<-round(nrow(dataA)/n)
+value4by<-paste(secitre,"secs",sep = " ")
+
+# Adjust NA , Outlier for CPU,DiskUtil,CacheHit
+dataA$CPU<- ifelse(dataA$CPU <= 100,dataA$CPU,50)
+dataA$DiskUtil<- ifelse(dataA$DiskUtil <= 100,dataA$DiskUtil,50)
+dataA$CacheHit <- ifelse(is.na(dataA$CacheHit),50,dataA$CacheHit)
+
+# Adjust NA , Outlier for DiskDrive
+diskA$ReadLatency<-ifelse(diskA$ReadLatency != ".",diskA$ReadLatency,NA)
+diskA$WriteLatency<-ifelse(diskA$WriteLatency != ".",diskA$WriteLatency,NA)
+diskA[diskA==""]<-NA
+new_diskA<-na.omit(diskA)
+
+# Get Aggregate List
+aggrlist<-unique(new_diskA$Aggr)
+# Get Vfiler List for CIFS
+vfilerlist<-unique(cifsA$Vfiler)
+
+###############
+# Function X OPS + CPU,DISK Utilization Dataframe="dataA"
+func_ops <- function(x,a=dataA$CPU,b=dataA$DiskUtil,z=dataA$Iteration){
+
+  if(x == "NFS") xva<-dataA$NFS
+  else if(x == "CIFS") xva<-dataA$CIFS
+  else if(x == "FCP") xva<-dataA$FCP
+  else if(x == "iSCSI") xva<-dataA$iSCSI
+
+  par(oma = c(2, 0, 0, 2))
+  plot(by(xva,z,mean),type="h", lwd=15,col="antiquewhite4",ylab="OPS",xlab="Iteration",xaxt="n")
+  par(new=T)
+  plot(by(a,z,mean),type="l",lwd=3,col="cyan4",ylim=c(0,100),axes=FALSE,ylab="",xlab="")
+  par(new=T)
+  plot(by(b,z,mean),type="l",lwd=3,col="cyan2",ylim=c(0,100),axes=FALSE,ylab="",xlab="")
+  axis(4)
+  mtext("%",side=4,line=3)
+  axis(1,at=1:n,labels=c(1:n))
+
+  proto<-paste(x,"OPS",sep = " ")
+  legend("topleft",legend=c(proto,"CPU","DISK"),lty=1,lwd=3,col=c("antiquewhite4","cyan4","cyan2"),bty="n",y.intersp=1)
+  }
+
+# Function X Latency
+func_latency <- function(type){
+  maxv1<-max(laA$Read.Latency[laA$Type == type])
+  maxv2<-max(laA$Write.Latency[laA$Type == type])
+  if(maxv1 < maxv2) maxlim<-maxv2 else maxlim<-maxv1
+
+  title<-paste(type,"latency",sep = " ")
+  plot(laA$Read.Latency[laA$Type == type],main=title,type="l",col=4,lwd=2,ylim=c(0,maxlim),xlab="Iteration",ylab="ms")
+  par(new=T)
+  plot(laA$Write.Latency[laA$Type == type],type="l",col=3,lwd=2,ylim=c(0,maxlim),axes=FALSE,ylab="",xlab="")
+  legend("topleft",legend=c("Read","Write"),lty=1,lwd=3,col=c(4,3),bty="n",y.intersp=1,bg="transparent")
+  }
+
+### For Workload
+# Function Full Workload plots
+func_fullw <- function(protocol="nfsv3"){
+  library(ggplot2)
+  library(reshape)
+  fulltitle<-toupper(protocol)
+  full<-subset(workload_full,Type == protocol,select=c(RR,RW,SR,SW,Iteration))
+  gfull<-melt(data=full,id="Iteration")
+  g <- ggplot(
+  gfull,
+  aes(
+    x = Iteration,
+    y = value,
+    fill = variable,
+    stat = "identity"
+    )
+  )
+  g <- g + geom_bar()
+ 
+  g <- g + scale_fill_manual(values=c("gray10","gray35","gray50","gray75"),
+                             breaks = c("RR","RW","SR","SW"),
+                             labels = c("Random Read","Random Write","Sequential Read","Sequential Write"))
+  g <- g + theme(
+    legend.position = "right" ,
+    axis.text.x = element_text(angle=90,size=13,colour="black"),
+    axis.text.y = element_text(size=13,colour="black")
+    )
+  g <- g + xlab("Iteration") + ylab("%") +  ggtitle(fulltitle)
+
+  g <- g + guides(
+    fill = guide_legend(
+      title="Workload",
+      title.theme = element_text(size=15, face="italic", colour = "black", angle = 0),
+      label.theme = element_text(size=15, colour = "black", angle = 0)
+      )
+    )
+ 
+  plot(g)
+  }
+### For FCP,iSCSI
+# Function Throughput
+func_through <- function(type="fcp"){
+  maxv1<-max(thA$Read.Throughput[thA$Type == type])
+  maxv2<-max(thA$Write.Throughput[thA$Type == type])
+  if(maxv1 < maxv2) maxlim<-maxv2 else maxlim<-maxv1
+
+  title<-paste(type,"throughput",sep = " ")
+  plot(thA$Read.Throughput[thA$Type == type],main=title,type="l",col=4,lwd=2,ylim=c(0,maxlim),xlab="Iteration",ylab="kb/s")
+  par(new=T)
+  plot(thA$Write.Throughput[thA$Type == type],type="l",col=3,lwd=2,ylim=c(0,maxlim),axes=FALSE,ylab="",xlab="")
+  legend("topleft",legend=c("Read","Write"),lty=1,lwd=3,col=c(4,3),bty="n",y.intersp=1,bg="transparent")
+  }
+
+# Function LUN OPS by Iteration time
+func_lunops_t <- function(lunname,x="read_ops",y="write_ops",z="other_ops"){
+  onelun<-subset(lunlist,lun.name == lunname , select=c(Time,para,value))
+
+  maxv1<-max(onelun$value[onelun$para == x])
+  maxv2<-max(onelun$value[onelun$para == y])
+  if(maxv1 < maxv2) maxlim<-maxv2 else maxlim<-maxv1
+
+  tmp<-seq(from=1,to=nrow(onelun),by=7)
+  t<-strptime(onelun[tmp,c(1)],"%m-%d %H:%M:%S")
+  plot(t,onelun$value[onelun$para == x],main="OPS",type="l",col=4,lwd=2,ylim=c(0,maxlim),xlab="Time/Iteration",ylab="ops",xaxt="n")
+  par(new=T)
+  plot(t,onelun$value[onelun$para == y],main="OPS",type="l",col=3,lwd=2,ylim=c(0,maxlim),ylab="ops",xaxt="n")
+  par(new=T)
+  plot(t,onelun$value[onelun$para == z],main="OPS",type="l",col=9,lwd=2,ylim=c(0,maxlim),ylab="ops",xaxt="n")
+
+  axis(4)
+  mtext("%",side=4,line=3)
+  r <- as.POSIXct(round(range(t),"sec"))
+  axis.POSIXct(1, at=seq(r[1],r[2],by=value4by),format="%H:%M:%S")
+  legend("topleft",legend=c("Read","Write","Other"),lty=1,lwd=3,col=c(4,3,9),bty="n",y.intersp=1,bg="transparent")
+  }
+
+### For LUN
+# Function LUN for Throughput , Latency
+func_lun_itre <- function(lunname,x,y,title){
+  # x = read_data or avg_read_latency
+  # y = write_data or avg_write_latency
+  onelun<-subset(lunlist,lun.name == lunname , select=c(Time,para,value))
+
+  maxv1<-max(onelun$value[onelun$para == x])
+  maxv2<-max(onelun$value[onelun$para == y])
+  if(maxv1 < maxv2) maxlim<-maxv2 else maxlim<-maxv1
+
+  if(x == "read_data") label<-"KB/s" else label<-"ms"
+
+  plot(onelun$value[onelun$para == x],main=title,type="l",col=4,lwd=2,ylim=c(0,maxlim),xlab="Iteration",ylab=label,xaxt="n")
+  par(new=T)
+  plot(onelun$value[onelun$para == y],main=title,type="l",col=3,lwd=2,ylim=c(0,maxlim),xlab="Iteration",ylab=label,xaxt="n")
+
+  axis(side=1,at=1:n)
+  legend("topleft",legend=c(x,y),lty=1,lwd=3,col=c(4,3),bty="n",y.intersp=1,bg="transparent")
+  }
+
+```
+
+Perfstat Report for NAS
+========================================================
+
+ほげ株式会社様（`r sysinfo[1,3]`）
+-------------------------
+
+<font size="5">
+<a href="#ca" style="text-decoration: none;">`r sysinfo[1,5]`</a>
+</font>
+<font size="4">
+* Information
+* Summary
+* Workload
+* Violin plot
+* CPU , DISK Utilization
+* NFS , CIFS OPS
+* NFS , CIFS Latency
+* CIFS Connection User
+* Disk Read/Write
+* Net In/Out
+* Cache Hit
+* CP Type (Internal)
+* Correlation (Internal)
+* Disk Aggregate Utilization (Internal)
+* Disk Aggregate Latency (Internal)
+</font>
+
+****
+
+<h1 id="ca">■■■ `r sysinfo[1,5]` ■■■</h1>
+=========================
+
+Information
+----------------
+
+* 2014 __`r dataA[1,1]`__ から 2014 __`r dataA[nrow(dataA),1]`__
+* Iteration 区間 __30分__
+
+* 主に__ファイルサーバ__として稼動
+
+Model   | Data ONTAP  | Serial   |Nodename
+------  | ----------- | ------   | -------
+`r sysinfo[1,1]` | `r sysinfo[1,2]` | `r sysinfo[1,3]` |`r sysinfo[1,5]`
+
+
+Summary
+----------------
+
+統計値|CPU | DISK | NFS | CIFS | Net In | Net Out | Disk Read | Disk Write
+------|----|----- |-----|------|--------|---------|-----------|----------
+最小値|`r min(dataA$CPU)`|`r min(dataA$DiskUtil)`|`r min(dataA$NFS)`|`r min(dataA$CIFS)`|`r min(dataA$Net.In)`|`r min(dataA$Net.Out)`|`r min(dataA$DiskRead)`|`r min(dataA$DiskWrite)`
+第1四分位|`r quantile(dataA$CPU)[[2]]`|`r quantile(dataA$DiskUtil)[[2]]`|`r quantile(dataA$NFS)[[2]]`|`r quantile(dataA$CIFS)[[2]]`|`r quantile(dataA$Net.In)[[2]]`|`r quantile(dataA$Net.Out)[[2]]`|`r quantile(dataA$DiskRead)[[2]]`|`r quantile(dataA$DiskWrite)[[2]]`
+中間値|`r median(dataA$CPU)`|`r median(dataA$DiskUtil)`|`r median(dataA$NFS)`|`r median(dataA$CIFS)`|`r median(dataA$Net.In)`|`r median(dataA$Net.Out)`|`r median(dataA$DiskRead)`|`r median(dataA$DiskWrite)`
+第3四分位|`r quantile(dataA$CPU)[[4]]`|`r quantile(dataA$DiskUtil)[[4]]`|`r quantile(dataA$NFS)[[4]]`|`r quantile(dataA$CIFS)[[4]]`|`r quantile(dataA$Net.In)[[4]]`|`r quantile(dataA$Net.Out)[[4]]`|`r quantile(dataA$DiskRead)[[4]]`|`r quantile(dataA$DiskWrite)[[4]]`
+最大値|`r max(dataA$CPU)`|`r max(dataA$DiskUtil)`|`r max(dataA$NFS)`|`r max(dataA$CIFS)`|`r max(dataA$Net.In)`|`r max(dataA$Net.Out)`|`r max(dataA$DiskRead)`|`r max(dataA$DiskWrite)`
+平均値|`r round(mean(dataA$CPU),digits=1)`|`r round(mean(dataA$DiskUtil),digits=1)`|`r round(mean(dataA$NFS),digits=1)`|`r round(mean(dataA$CIFS),digits=1)`|`r round(mean(dataA$Net.In),digits=1)`|`r round(mean(dataA$Net.Out),digits=1)`|`r round(mean(dataA$DiskRead),digits=1)`|`r round(mean(dataA$DiskWrite),digits=1)`
+標準偏差（σ）|`r round(sd(dataA$CPU),digits=1)`|`r round(sd(dataA$DiskUtil),digits=1)`|`r round(sd(dataA$NFS),digits=1)`|`r round(sd(dataA$CIFS),digits=1)`|`r round(sd(dataA$Net.In),digits=1)`|`r round(sd(dataA$Net.Out),digits=1)`|`r round(sd(dataA$DiskRead),digits=1)`|`r round(sd(dataA$DiskWrite),digits=1)`
+変動係数（Cv）|`r round(sd(dataA$CPU)/mean(dataA$CPU),digits=1)`|`r round(sd(dataA$DiskUtil)/mean(dataA$DiskUtil),digits=1)`|`r round(sd(dataA$NFS)/mean(dataA$NFS),digits=1)`|`r round(sd(dataA$CIFS)/mean(dataA$CIFS),digits=1)`|`r round(sd(dataA$Net.In)/mean(dataA$Net.In),digits=1)`|`r round(sd(dataA$Net.Out)/mean(dataA$Net.Out),digits=1)`|`r round(sd(dataA$DiskRead)/mean(dataA$DiskRead),digits=1)`|`r round(sd(dataA$DiskWrite)/mean(dataA$DiskWrite),digits=1)`
+
+
+<blockquote>
+Iteration区間の全サンプリングの平均値をプロット
+</blockquote>
+
+```{r summary-plot}
+mat<-matrix(c(tapply(dataA$NFS,dataA$Iteration,mean),tapply(dataA$CIFS,dataA$Iteration,mean)),nrow=n,ncol=2)
+matt<-t(mat)
+
+tmp<-seq(from=1,to=nrow(dataA),by=secitre)
+t<-strptime(dataA[tmp,c(1)],"%m-%d %H:%M:%S")
+par(oma = c(2, 0, 0, 2))
+barplot(matt,beside=T,col=c("antiquewhite4","antiquewhite3"),ylab="OPS",xlab="Time/Iteration")
+par(new=T)
+plot(t,by(dataA$CPU,dataA$Iteration,mean),type="l",lwd=3,col="cyan4",ylim=c(0,100),axes=FALSE,ylab="",xlab="")
+par(new=T)
+plot(t,by(dataA$DiskUtil,dataA$Iteration,mean),type="l",lwd=3,col="cyan2",ylim=c(0,100),axes=FALSE,ylab="",xlab="")
+axis(4)
+mtext("%",side=4,line=3)
+r <- as.POSIXct(round(range(t),"secs"))
+axis.POSIXct(1, at=seq(r[1],r[2],by=value4by),format="%H:%M:%S")
+title("NAS Summary")
+legend("topleft",legend=c("NFS","CIFS","CPU","DISK"),lty=1,lwd=3,col=c("antiquewhite4","antiquewhite3","cyan4","cyan2"),bty="n",y.intersp=1)
+abline(h=85,lty=3,col="cyan4")
+abline(h=60,lty=3,col="cyan2")
+```
+
+-------------
+
+### Workload
+
+<blockquote>
+Random Read(RR)、Random Write(RW)、Sequential Read(SR)、Sequential Write(SW)の割合
+<br>
+各プロトコル毎の全Iteration区間の各IOの総カウント数から算出
+<br>
+<font color="red">（＊）</font> 16K以上 をSequtial Accessとする
+</blockquote>
+<p>
+
+Protocol | RR | RW | SR | SW
+-----|----|----|----|----
+NFS(Total) |5 |77 |10 |8
+NFS(Avg) |`r round(mean(nfsfull$RR))`|`r 100-round(mean(nfsfull$RR))-round(mean(nfsfull$SR))-round(mean(nfsfull$SW))`|`r round(mean(nfsfull$SR))`|`r round(mean(nfsfull$SW))`
+CIFS(Total) |8 |81 |1 |10
+CIFS(Avg) |`r round(mean(cifsfull$RR))`|`r 100-round(mean(cifsfull$RR))-round(mean(cifsfull$SR))-round(mean(cifsfull$SW))`|`r round(mean(cifsfull$SR))`|`r round(mean(cifsfull$SW))`
+FCP |- |- |- |-
+iSCSI |- |- |- |-
+
+<blockquote>
+Random Read(RR)、Random Write(RW)、Sequential Read(SR)、Sequential Write(SW)のIteration毎の割合をプロット
+<br>
+<font color="red">（＊）</font>各Iteration毎のワークロード比率は全体の比率と異なる場合がある点に注意（総IOカウント数、各ブロックサイズの密度は異なるため）
+</blockquote>
+
+```{r workload-plot}
+func_fullw(protocol="nfsv3")
+func_fullw(protocol="cifs")
+```
+
+-------------
+
+### Violin plot
+
+<blockquote>
+取得期間全てにおいて、CPUとDISK Utilizationの割合の密度をプロット
+<br>
+◯は中央値、黒箱の上端：第3四分位点、下端：第1四分位点
+</blockquote>
+
+
+
+```{r violin-plot1}
+library("vioplot")
+vioplot(dataA$CPU,dataA$DiskUtil,names=c("CPU","DISK"),col="cadetblue",rectCol="black",colMed="white")
+title(main="CPU , DISK Utilization")
+```
+
+### NFS , CIFS OPS
+
+<blockquote>
+取得期間全てにおいて、NFSとCIFS OPSの密度をプロット
+<br>
+◯は中央値、黒箱の上端：第3四分位点、下端：第1四分位点
+</blockquote>
+
+```{r violin-plot2}
+vioplot(dataA$NFS,dataA$CIFS,names=c("NFS OPS","CIFS OPS"),col="cadetblue",rectCol="black",colMed="white")
+title(main="NFS , CIFS OPS")
+```
+
+-------------
+
+### Latency NFS , CIFS
+
+<blockquote>
+Iteration毎に取得されているレイテンシー値をプロット
+</blockquote>
+
+<font size="2">_NFS_</font>
+```{r latency-nfs,results='markup'}
+newlatency<-subset(laA,Type == "nfs",select=c(Read.Latency,Write.Latency))
+summary(newlatency)
+```
+
+<font size="2">_CIFS_</font>
+```{r latency-cifs,results='markup'}
+newlatency<-subset(laA,Type == "cifs",select=c(Read.Latency,Write.Latency))
+summary(newlatency)
+```
+
+```{r latency-plot}
+par(mfrow=c(1,2))
+func_latency(type="nfsv3")
+func_latency(type="cifs")
+```
+
+-------------
+
+### CIFS Connection User
+
+<blockquote>
+Iteration毎に取得されているCIFS接続ユーザ数をプロット
+</blockquote>
+
+
+```{r cifs-connection}
+for (vfiler_name in vfilerlist){
+  vfiler<-subset(cifsA,Vfiler == vfiler_name,select=c(CIFS.Stats,Value,Iteration))
+  barplot(by(vfiler$Value[vfiler$CIFS.Stats == "curr_conn_user_cnt"],unique(vfiler$Iteration),mean),main=vfiler_name,ylab="User Count",xlab="Iteration")
+  }
+```
+
+-------------
+
+### Disk Read/Write
+
+<blockquote>
+Iteration区間の全サンプリングの平均値をプロット
+</blockquote>
+
+```{r diskRW}
+MBR<-by(dataA$DiskRead,dataA$Iteration,mean)/1000
+MBW<-by(dataA$DiskWrite,dataA$Iteration,mean)/1000
+
+maxdiskread<-max(by(dataA$DiskRead,dataA$Iteration,mean)/1000)
+maxdiskwrite<-max(by(dataA$DiskWrite,dataA$Iteration,mean)/1000)
+
+if(maxdiskread < maxdiskwrite) maxdisk<-maxdiskwrite else maxdisk<-maxdiskread
+
+par(mfrow=c(1,2))
+plot(MBR,main="Disk Read",type="l",col=1,lwd=2,ylim=c(0,maxdisk),xlab="Iteration",ylab="MB/s")
+plot(MBW,main="Disk Write",type="l",col=1,lwd=2,ylim=c(0,maxdisk),xlab="Iteration",ylab="MB/s")
+```
+
+### Net In/Out
+
+<blockquote>
+Iteration区間の全サンプリングの平均値をプロット
+</blockquote>
+
+```{r netRW}
+NETIN<-by(dataA$Net.In,dataA$Iteration,mean)/1000
+NETOUT<-by(dataA$Net.Out,dataA$Iteration,mean)/1000
+
+maxnetin<-max(by(dataA$Net.In,dataA$Iteration,mean)/1000)
+maxnetout<-max(by(dataA$Net.Out,dataA$Iteration,mean)/1000)
+if(maxnetin < maxnetout) maxnet<-maxnetout else maxnet<-maxnetin
+
+par(mfrow=c(1,2))
+plot(NETIN,main="Net In",type="l",col=1,lwd=2,ylim=c(0,maxnet),xlab="Iteration",ylab="MB/s")
+plot(NETOUT,main="Net Out",type="l",col=1,lwd=2,ylim=c(0,maxnet),xlab="Iteration",ylab="MB/s")
+```
+
+-------------
+
+### Cache Hit
+
+<blockquote>
+Iteration区間の全サンプリングの平均値をプロット
+</blockquote>
+
+```{r cachehit}
+plot(by(dataA$CacheHit,dataA$Iteration,mean),main="Cache Hit",type="l",col=1,lwd=2,ylim=c(0,100),xlab="Iteration",ylab="%")
+```
+
+### CP Type (Internal)
+
+<blockquote>
+全区間で取得されているCP Type値の割合をフラグ毎にプロット
+</blockquote>
+
+```{r cptype}
+barplot(prop.table(table(dataA$CPtype)))
+```
+-------------
+
+### Correlation (Internal)
+
+<blockquote>
+全区間で取得したパラメータの相関係数
+</blockquote>
+
+```{r correlation,results='markup'}
+options(width=180)
+
+cordata<-subset(dataA,select=c(CPU,DiskUtil,NFS,CIFS,Net.In,Net.Out,DiskRead,DiskWrite,CacheHit))
+cor(cordata)
+```
+
+-------------
+
+Disk Aggregate Utilization (Internal)
+
+<blockquote>
+取得期間全てにおいて、Drive毎の使用率の平均値をプロット
+</blockquote>
+
+```{r disk-aggr-util,message=FALSE,comment=''}
+for (alist in aggrlist) {
+  disk_num<-length(unique(new_diskA$DriveID[new_diskA$Aggr == alist]))
+  Dtype<-unique(new_diskA$Type[new_diskA$Aggr == alist])
+  cat(alist,"(",disk_num,")"," / ",as.character(Dtype),"\n")
+
+  }
+for (alist in aggrlist){
+  #cat(alist,"\n")
+  aggrtmp<-subset(new_diskA,Aggr == alist , select=c(DriveID,Type,Util,ReadLatency,WriteLatency,Iteration))
+  #print(summary(aggrtmp))
+  #print(unique(aggrtmp$Type))
+  barplot(by(aggrtmp$Util,aggrtmp$DriveID,mean)[!is.na(by(aggrtmp$Util,aggrtmp$DriveID,mean))],main=alist,xlab="Drives",ylab="%",ylim=c(0,100))
+  drivelist<-unique(aggrtmp$DriveID)
+  for (dname in drivelist){
+    cat(dname,"\n")
+    print(summary(aggrtmp$Util[aggrtmp$DriveID == dname]))  
+    }
+  }
+```
+
+-------------
+
+Disk Aggregate Latency (Internal)
+
+<blockquote>
+取得期間全てにおいて、Drive毎のレイテンシー平均値をプロット
+</blockquote>
+
+```{r disk-aggr-latency}
+for (alist in aggrlist){
+  aggrtmp<-subset(new_diskA,Aggr == alist , select=c(DriveID,Type,Util,ReadLatency,WriteLatency,Iteration))
+  barplot(by(aggrtmp$ReadLatency,aggrtmp$DriveID,mean)[!is.na(by(aggrtmp$ReadLatency,aggrtmp$DriveID,mean))],main=alist,xlab="Drives",ylab="us")
+  }
+```
