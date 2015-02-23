@@ -1,7 +1,7 @@
 #!/bin/bash
 # $1 = Source Perfstat Log file
 
-DIR=$(dirname $0)/myscript
+DIR=$(dirname $0)
 LOG=./full_workload.log
 SRC=$1
 ITR=$2
