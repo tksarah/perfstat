@@ -3,3 +3,9 @@ Pertstat Semi Automatic Report
 
 Overview
 --------
+
+以下のスクリプトを提供
+
+* Perfstat生ファイルからプロトコルワークロードの割合を出すスクリプト
+* Perfstat生ファイルから各種統計情報を抜き出すスクリプト
+* RStudioを使ってパフォーマンスレポートを作るために生ファイルをクレンジングするスクリプト
