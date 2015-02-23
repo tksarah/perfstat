@@ -2,7 +2,7 @@
 
 LOG=$1
 ITRE=$2
-DIR=./myscript
+DIR=$(dirname $0)/myscript
 
 ####### SystemInfo #######
 echo 
