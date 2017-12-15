@@ -1,7 +1,7 @@
 Pertstat Semi Automatic Report
 ==============================
 
-Overview
+概要  
 --------
 
 以下のスクリプトを提供
